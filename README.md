@@ -1,23 +1,29 @@
 ﻿# EconoFeast
 
-A unique Discord economy bot, with a focus on cannibalism.
-
-## Backstory
-
-View the backstory for the start to the *lore* **[here]()**!
+EconoCord reborn with a cannibalistic vengeance.
 
 ## Invite
 
-**EconoFeast** can be invited from **[here](https://example.com)**!
+**EconoFeast** can be invited from **[here](https://discord.com/oauth2/authorize?client_id=1018935466101309512&permissions=414464723968&scope=bot%20applications.commands)**!
 
 ## Usage
 
 **EconoFeast** uses slash commands.
 
-Make sure the bot has been invited with the `applications.commands` scope then just put a `/` in any text channel!
+Just make sure the bot has been invited with the `applications.commands` scope then just put a `/` in any text channel!
 
 ## Development Info
 
-- **Made with:** C#
+- **Made With:** C#
 - **API Wrapper:** [DSharpPlus](https://dsharpplus.github.io)
-- **Packages used:** `DSharpPlus`, `DSharpPlus.SlashCommands`, `Newtonsoft.Json`, `Radarcord.NET`, `supabase-csharp` 
+- **Installed Packages:** `DSharpPlus`, `DSharpPlus.SlashCommands`, `Newtonsoft.Json`, `Radarcord.NET` _(which will be used soon)_, `supabase-csharp`
+- **IDE Used:** [Visual Studio 2022 - Community Edition](https://visualstudio.microsoft.com/vs/community/)
+
+## Special Thanks
+
+- Thank you to Scorprian for giving me the profile picture for the bot.
+- Thank you to my friends for supporting me with this idea.
+
+---
+
+I hope you guys enjoy this bot!

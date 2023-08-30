@@ -19,10 +19,12 @@ namespace ThingBot
         public static Dictionary<string, ShopItem> Items { get; set; }
         public static List<DiscordActivity> Activities { get; } = new()
         {
-            new DiscordActivity("AI fucking", ActivityType.Watching),
-            new DiscordActivity("Backed up by a couple friends!", ActivityType.Playing),
-            new DiscordActivity("The only economy bot you'll need, I think.", ActivityType.Playing)
+            new DiscordActivity("The only economy bot you'll need, I think.", ActivityType.Playing),
+            new DiscordActivity("for revenge", ActivityType.Playing),
+            new DiscordActivity("Check the shop!", ActivityType.Playing),
+            new DiscordActivity("the users duke it out", ActivityType.Watching)
         };
+        public static List<ulong> NonParticipatingUsers { get; } = new();
 
         #endregion
     }

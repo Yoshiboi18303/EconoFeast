@@ -11,7 +11,7 @@ namespace ThingBot.Commands
     public class EconomyCommands : ApplicationCommandModule
     {
         [SlashCommand("eat", "Turn a user into your meal, this can only be done 3 times throughout the day.")]
-        // [SlashCooldown(3, 86400.0, SlashCooldownBucketType.User)]
+        [SlashCooldown(1, 300.0, SlashCooldownBucketType.User)] // This'll be updated with 3 uses per day eventually.
         public async Task EatUserCommand(InteractionContext ctx, [Option("user", "The user to target")] DiscordUser userToEat)
         {
             await Utils.DeferAsync(ctx);

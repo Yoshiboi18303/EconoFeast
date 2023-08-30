@@ -60,13 +60,25 @@ namespace ThingBot
             await Task.Delay(-1);
         }
 
-        private Task OnClientReady(DiscordClient sender, DSharpPlus.EventArgs.ReadyEventArgs args)
+        private async Task OnClientReady(DiscordClient sender, DSharpPlus.EventArgs.ReadyEventArgs args)
         {
             Globals.StartDate = DateTime.Now;
 
             Logger.Success("Connected to Discord!");
 
-            return Task.CompletedTask;
+            await ActivityLoopAsync(sender);
+        }
+
+        private async Task ActivityLoopAsync(DiscordClient client)
+        {
+            var random = new Random();
+            var activity = Globals.Activities[random.Next(Globals.Activities.Count)];
+
+            await client.UpdateStatusAsync(activity);
+
+            await Task.Delay(15 * 1000);
+
+            await ActivityLoopAsync(client);
         }
     }
 }
