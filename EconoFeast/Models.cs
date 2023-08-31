@@ -3,7 +3,7 @@
 using Postgrest.Attributes;
 using Postgrest.Models;
 
-namespace ThingBot
+namespace EconoFeast
 {
     public class ItemAmounts
     {
@@ -15,6 +15,8 @@ namespace ThingBot
         public ulong RatPoison { get; set; }
         [JsonProperty("medicine")]
         public ulong DigestionMedicine { get; set; }
+        [JsonProperty("revealer")]
+        public ulong SecretRevealer { get; set; }
     }
 
     [Table("users")]

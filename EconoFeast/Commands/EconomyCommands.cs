@@ -1,21 +1,27 @@
 ﻿using DSharpPlus;
+
+using DSharpPlus.AsyncEvents;
+
 using DSharpPlus.Entities;
+using DSharpPlus.EventArgs;
+
 using DSharpPlus.SlashCommands;
 using DSharpPlus.SlashCommands.Attributes;
 
 using System.Linq.Expressions;
 
-namespace ThingBot.Commands
+namespace EconoFeast.Commands
 {
     [SlashCommandGroup("economy", "The main part of the bot!")]
     public class EconomyCommands : ApplicationCommandModule
     {
-        [SlashCommand("eat", "Turn a user into your meal, this can only be done 3 times throughout the day.")]
-        [SlashCooldown(1, 300.0, SlashCooldownBucketType.User)] // This'll be updated with 3 uses per day eventually.
+        [SlashCommand("eat", "Turn a user into your meal, this can only be done 1 time every 3 minutes.")]
+        [SlashCooldown(1, 180.0, SlashCooldownBucketType.User)] // This'll be updated with 3 uses per day eventually.
         public async Task EatUserCommand(InteractionContext ctx, [Option("user", "The user to target")] DiscordUser userToEat)
         {
-            await Utils.DeferAsync(ctx);
+            await ctx.DeferAsync();
 
+            #region Checks
             if (userToEat.IsBot)
             {
                 var errorEmbed = Utils.MakeErrorEmbed("You can't just eat my kind, what have they done to you?");
@@ -60,6 +66,8 @@ namespace ThingBot.Commands
             if (Utils.UserIsFull(currentUser))
             {
                 var errorEmbed = Utils.MakeErrorEmbed("You're completely stuffed, one more person and you'll pop like a balloon *(and we can't have that)*!\n\n**Tip:** Use the `digest` command for a chance to increase your stomach capacity!");
+                await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(errorEmbed));
+                return;
             }
 
             if (targetUser.IsInStomach)
@@ -69,12 +77,14 @@ namespace ThingBot.Commands
                 return;
             }
 
-            if (!targetUser.CanBeEaten)
+            if (!targetUser.CanBeEaten || Globals.NonParticipatingUsers.Contains(userToEat.Id))
             {
                 var errorEmbed = Utils.MakeErrorEmbed($"{userToEat.Username} has opted out of the bot, you cannot eat them!");
                 await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(errorEmbed));
                 return;
             }
+
+            #endregion
 
             var random = new Random();
 
@@ -86,7 +96,7 @@ namespace ThingBot.Commands
             {
                 peopleInStomachList,
                 currentUser.AmountOfPeopleInStomach + 1,
-                DateTime.Now
+                // DateTime.Now
             };
 
             var targetUserValues = new List<object>()
@@ -100,7 +110,7 @@ namespace ThingBot.Commands
             {
                 x => x.PeopleInStomach,
                 x => x.AmountOfPeopleInStomach,
-                x => x.LastMealTime
+                // x => x.LastMealTime
             }, currentUserValues);
 
             await Utils.UpdateUserAsync(userToEat, new List<Expression<Func<User, object>>>()
@@ -117,7 +127,7 @@ namespace ThingBot.Commands
             {
                 try
                 {
-                    await member.SendMessageAsync(embed);
+                    await member.SendMessageAsync(eatenEmbed);
                 }
                 catch (Exception ex)
                 {
@@ -139,7 +149,7 @@ namespace ThingBot.Commands
         public async Task DigestUsersCommand(InteractionContext ctx)
         {
             // Plan: Make this a minigame rather than an immediate reward.
-            await Utils.DeferAsync(ctx);
+            await ctx.DeferAsync();
             var user = await Utils.GetUserAsync(ctx.User);
 
             if (user.AmountOfPeopleInStomach == 0)
@@ -243,7 +253,7 @@ namespace ThingBot.Commands
         [SlashCommand("extract", "Extract all bones from your stomach")]
         public async Task ExtractBonesCommand(InteractionContext ctx)
         {
-            await Utils.DeferAsync(ctx);
+            await ctx.DeferAsync();
 
             var user = await Utils.GetUserAsync(ctx.User);
 
@@ -258,7 +268,8 @@ namespace ThingBot.Commands
             // Amount of bones in the user - Amount of bones lost due to digestion (0 if the user has the Digestion Medicine item).
             // Example: 206 (bones in stomach) - 52 (bones lost) = 152 (total)
             var random = new Random();
-            var bonesLost = Utils.EvaluateBool(user.Items.DigestionMedicine > 0, 0, random.NextInt64(1, Convert.ToInt64(user.AmountOfBonesInStomach / 2)));
+            var hasDigestionMedicine = user.Items.DigestionMedicine > 0;
+            var bonesLost = Utils.EvaluateBool(hasDigestionMedicine, 0, random.NextInt64(1, Convert.ToInt64(user.AmountOfBonesInStomach / 2)));
             var totalCollected = user.AmountOfBonesInStomach - Convert.ToUInt64(bonesLost);
 
             var keySelectors = new List<Expression<Func<User, object>>>()
@@ -272,6 +283,18 @@ namespace ThingBot.Commands
                 user.AmountOfBonesCollected + totalCollected
             };
 
+            if (hasDigestionMedicine)
+            {
+                keySelectors.Add(x => x.Items);
+                values.Add(new ItemAmounts()
+                {
+                    AcidSpit = user.Items.AcidSpit,
+                    DigestionMedicine = user.Items.DigestionMedicine - 1,
+                    Lube = user.Items.Lube,
+                    RatPoison = user.Items.RatPoison,
+                });
+            }
+
             await Utils.UpdateUserAsync(user.Id, keySelectors, values);
 
             string description = Utils.EvaluateBool(bonesLost == 0, $"Your digestion medicine has allowed you to extract all {totalCollected} bones from your stomach, good purchase!", $"You have extracted {totalCollected} bones from your stomach, however the other {user.AmountOfBonesInStomach - totalCollected} bones were lost to digestion.");
@@ -284,7 +307,7 @@ namespace ThingBot.Commands
         [SlashCommand("shop", "View the entire shop, or an item within it.")]
         public async Task ShopCommand(InteractionContext ctx, [Option("id", "The item ID to look for")] string? id = null)
         {
-            await Utils.DeferAsync(ctx);
+            await ctx.DeferAsync();
 
             #region Item Details
 
@@ -313,8 +336,11 @@ namespace ThingBot.Commands
 
             #endregion
 
-            // Note to self: 5 items per page, remember this.
+            #region Get Initial Page
+
             var shopItems = Globals.Items.ToArray();
+
+            // Note to self: 5 items per page, remember this.
             var pages = new Dictionary<int, List<ShopItem>>()
             {
                 {
@@ -332,7 +358,7 @@ namespace ThingBot.Commands
                     1,
                     new List<ShopItem>()
                     {
-                        new ShopItem("test", "Test", "A test item, just because.", 99999)
+                        shopItems[5].Value,
                     }
                 }
             };
@@ -341,17 +367,22 @@ namespace ThingBot.Commands
             int maxPages = pages.Count;
             var items = Utils.LoadPage(pages, pageNumber - 1);
 
-            var buttons = new DiscordButtonComponent[]
-            {
-                new DiscordButtonComponent(ButtonStyle.Danger, "previous-page", "Previous", pageNumber == 1, new DiscordComponentEmoji("◀️")),
-                new DiscordButtonComponent(ButtonStyle.Success, "next-page", "Next", pageNumber == maxPages, new DiscordComponentEmoji("▶️"))
-            };
+            #endregion
 
             Func<ShopItem, string> valueFunc = item => $"ID: {item.Id}";
 
-            // Save repeated parts of making the embed
+            #region Repeated Parts
+
+            // Save repeated parts
             const string title = "Shop";
             const string description = "Welcome to the shop, get some stuff to make you better than your competition!";
+
+            const string PREVIOUS_BUTTON_ID = "previous-page-shop";
+            const string NEXT_BUTTON_ID = "next-page-shop";
+
+            const string PREVIOUS_BUTTON_LABEL = "Previous";
+            const string NEXT_BUTTON_LABEL = "Next";
+
             var footer = new DiscordEmbedBuilder.EmbedFooter()
             {
                 Text = $"View more info on any item by passing in the id argument! - Page {pageNumber}/{maxPages}"
@@ -359,23 +390,31 @@ namespace ThingBot.Commands
 
             var fields = Utils.MakeShopItemFields(items, valueFunc);
 
+            #endregion
+
+            var buttons = new DiscordButtonComponent[]
+            {
+                new DiscordButtonComponent(ButtonStyle.Danger, PREVIOUS_BUTTON_ID, PREVIOUS_BUTTON_LABEL, pageNumber == 1, new DiscordComponentEmoji("◀️")),
+                new DiscordButtonComponent(ButtonStyle.Success, NEXT_BUTTON_ID, NEXT_BUTTON_LABEL, pageNumber == maxPages, new DiscordComponentEmoji("▶️"))
+            };
+
             var embed = Utils.MakeEmbed(DiscordColor.Cyan, title, description, footer: footer, fields: fields);
 
             await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddComponents(buttons).AddEmbed(embed));
 
             #region Interaction Handler
 
-            DSharpPlus.AsyncEvents.AsyncEventHandler<DiscordClient, DSharpPlus.EventArgs.ComponentInteractionCreateEventArgs> handlePagination = async (s, e) =>
+            AsyncEventHandler<DiscordClient, ComponentInteractionCreateEventArgs> handlePagination = async (s, e) =>
             {
                 if (e.User.Id != ctx.User.Id) return;
 
-                if (e.Id == "next-page")
+                if (e.Id == NEXT_BUTTON_ID)
                 {
                     pageNumber += 1;
                     buttons = new DiscordButtonComponent[]
                     {
-                        new DiscordButtonComponent(ButtonStyle.Danger, "previous-page", "Previous", pageNumber == 1, new DiscordComponentEmoji("◀️")),
-                        new DiscordButtonComponent(ButtonStyle.Success, "next-page", "Next", pageNumber == maxPages, new DiscordComponentEmoji("▶️"))
+                        new DiscordButtonComponent(ButtonStyle.Danger, PREVIOUS_BUTTON_ID, PREVIOUS_BUTTON_LABEL, pageNumber == 1, new DiscordComponentEmoji("◀️")),
+                        new DiscordButtonComponent(ButtonStyle.Success, NEXT_BUTTON_ID, NEXT_BUTTON_LABEL, pageNumber == maxPages, new DiscordComponentEmoji("▶️"))
                     };
                     items = Utils.LoadPage(pages, pageNumber - 1);
                     fields = Utils.MakeShopItemFields(items, valueFunc);
@@ -387,13 +426,13 @@ namespace ThingBot.Commands
 
                     await e.Interaction.CreateResponseAsync(InteractionResponseType.UpdateMessage, new DiscordInteractionResponseBuilder().AddEmbed(embed).AddComponents(buttons));
                 }
-                else if (e.Id == "previous-page")
+                else if (e.Id == PREVIOUS_BUTTON_ID)
                 {
                     pageNumber -= 1;
                     buttons = new DiscordButtonComponent[]
                     {
-                        new DiscordButtonComponent(ButtonStyle.Danger, "previous-page", "Previous", pageNumber == 1, new DiscordComponentEmoji("◀️")),
-                        new DiscordButtonComponent(ButtonStyle.Success, "next-page", "Next", pageNumber == maxPages, new DiscordComponentEmoji("▶️"))
+                        new DiscordButtonComponent(ButtonStyle.Danger, PREVIOUS_BUTTON_ID, PREVIOUS_BUTTON_LABEL, pageNumber == 1, new DiscordComponentEmoji("◀️")),
+                        new DiscordButtonComponent(ButtonStyle.Success, NEXT_BUTTON_ID, NEXT_BUTTON_LABEL, pageNumber == maxPages, new DiscordComponentEmoji("▶️"))
                     };
                     items = Utils.LoadPage(pages, pageNumber - 1);
                     fields = Utils.MakeShopItemFields(items, valueFunc);
@@ -419,17 +458,17 @@ namespace ThingBot.Commands
                 fields: fields);
             buttons = new DiscordButtonComponent[]
             {
-                new DiscordButtonComponent(ButtonStyle.Danger, "previous-page", "Previous", true, new DiscordComponentEmoji("◀️")),
-                new DiscordButtonComponent(ButtonStyle.Success, "next-page", "Next", true, new DiscordComponentEmoji("▶️"))
+                new DiscordButtonComponent(ButtonStyle.Danger, PREVIOUS_BUTTON_ID, PREVIOUS_BUTTON_LABEL, true, new DiscordComponentEmoji("◀️")),
+                new DiscordButtonComponent(ButtonStyle.Success, NEXT_BUTTON_ID, NEXT_BUTTON_LABEL, true, new DiscordComponentEmoji("▶️"))
             };
 
             await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddComponents(buttons).AddEmbed(embed));
         }
 
         [SlashCommand("buy", "Buy an item from the shop")]
-        public async Task BuyItemCommand(InteractionContext ctx, [Option("id", "The item ID to buy")] string id)
+        public async Task BuyItemCommand(InteractionContext ctx, [Option("id", "The item ID to buy")] string id, [Option("quantity", "How many of this item to buy, defaults to 1")] long quantity = 1)
         {
-            await Utils.DeferAsync(ctx);
+            await ctx.DeferAsync();
 
             if (!Globals.Items.ContainsKey(id))
             {
@@ -438,20 +477,187 @@ namespace ThingBot.Commands
                 return;
             }
 
+            if (quantity > 1 && id == "competition")
+            {
+                var badQuantityEmbed = Utils.MakeErrorEmbed("You're buying an item that is limited to 1 purchase, but you provided a quantitiy greater than 1!");
+                await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(badQuantityEmbed));
+                return;
+            }
+
             var user = await Utils.GetUserAsync(ctx.User);
             var item = Globals.Items[id];
 
-            var successfullyPurchased = await item.BuyAsync(user);
+            var result = await item.BuyAsync(user, Convert.ToInt32(quantity));
+            ulong? price = quantity > 0 ? item.Price * Convert.ToUInt64(quantity) : null;
 
-            if (!successfullyPurchased)
+            if (!result.IsSuccess)
             {
-                var errorEmbed = Utils.MakeErrorEmbed($"Couldn't purchase **{item.Name}**! You might not have enough bones to purchase this item.\n\n**Item requires:** `{item.Price}` bones\n**You have:** `{user.AmountOfBonesCollected}` bones\n**You need:** `{item.Price - user.AmountOfBonesCollected}` more bones.\n\n**Please try again once you get enough to purchase this item.**");
+                var description = $"Couldn't purchase **{quantity}** of **{item.Name}**!";
+                
+                
+                switch (result.FailureReason)
+                {
+                    case ItemPurchaseFailureReason.BadRequest:
+                        description += " You have provided a quantity less than 1, this is not allowed.";
+                        break;
+                    case ItemPurchaseFailureReason.InsuffientFunds:
+                        description += $" You don't have enough bones to purchase {quantity} of this item.\n\n**Item requires:** `{price}` bones (with the quantity included)\n**You have:** `{user.AmountOfBonesCollected}` bones\n**You need:** `{price - user.AmountOfBonesCollected}` more bones.\n\n**Please try again once you get enough to purchase this item.**";
+                        break;
+                }
+
+                var errorEmbed = Utils.MakeErrorEmbed(description);
                 await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(errorEmbed));
                 return;
             }
 
-            var successEmbed = Utils.MakeEmbed(DiscordColor.Green, description: $"You have successfully purchased **{item.Name}**, if this item is not an auto-redeem item, it has been added to your inventory.\n\n**You now have `{user.AmountOfBonesCollected - item.Price}` bones left.**");
+            var successEmbed = Utils.MakeEmbed(DiscordColor.Green, description: $"You have successfully purchased **{quantity}** of **{item.Name}**, if this item is not an auto-redeem item, it has been added to your inventory.\n\n**You now have `{user.AmountOfBonesCollected - price}` bones left.**");
             await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(successEmbed));
+        }
+
+        [SlashCommand("userinfo", "View your (or someone else's) information!")]
+        public async Task UserInformationCommand(InteractionContext ctx, [Option("user", "A user to view the balance of, defaults to you.")] DiscordUser? discordUser = null)
+        {
+            var user = discordUser ?? ctx.User;
+
+            var currentUser = await Utils.GetUserAsync(ctx.User);
+
+            bool canSeeSecretFields = ctx.User.Id == user.Id || currentUser.Items.SecretRevealer > Convert.ToUInt64(0);
+            await ctx.DeferAsync(canSeeSecretFields); // Hide the damn embed from the public if the user in context can see the SECRET fields, the public doesn't deserve to see that.
+
+            var document = await Utils.GetUserAsync(user);
+
+            if (ctx.User.Id != user.Id && currentUser.Items.SecretRevealer > 0)
+            {
+                await Utils.UpdateUserAsync(ctx.User, x => x.Items, new ItemAmounts()
+                {
+                    AcidSpit = currentUser.Items.AcidSpit,
+                    DigestionMedicine = currentUser.Items.DigestionMedicine,
+                    Lube = currentUser.Items.Lube,
+                    RatPoison = currentUser.Items.RatPoison,
+                    SecretRevealer = currentUser.Items.SecretRevealer - 1,
+                });
+            }
+
+            #region Repeated Parts
+
+            string BASE_TITLE = $"Info of {Utils.MakeFirstCharacterUppercase(user.Username)} ({user.Username})";
+            const string SECRET_TEXT = "[SECRET]";
+
+            const string PREVIOUS_BUTTON_ID = "previous-page-userinfo";
+            const string PREVIOUS_BUTTON_LABEL = "Previous";
+
+            const string NEXT_BUTTON_ID = "next-page-userinfo";
+            const string NEXT_BUTTON_LABEL = "Next";
+
+            #endregion
+
+            #region Fields
+
+            var page1Fields = new List<FieldData>()
+            {
+                new FieldData("Bones In Stomach", Utils.EvaluateBool(canSeeSecretFields, document.AmountOfBonesInStomach.ToString(), SECRET_TEXT), true),
+                new FieldData("Bones Collected", document.AmountOfBonesCollected.ToString(), true)
+            };
+
+            // This will be updated every time a new item is added, until I find a way to automate it.
+            var page2Fields = new List<FieldData>()
+            {
+                new FieldData("Acid Spit", document.Items.AcidSpit.ToString(), true),
+                new FieldData("Digestion Medicine", document.Items.DigestionMedicine.ToString(), true),
+                new FieldData("Lube", document.Items.Lube.ToString(), true),
+                new FieldData("Rat Poison", Utils.EvaluateBool(canSeeSecretFields, document.Items.RatPoison.ToString(), SECRET_TEXT), true),
+                new FieldData("Secret Revealer", Utils.EvaluateBool(canSeeSecretFields, document.Items.SecretRevealer.ToString(), SECRET_TEXT), true),
+            };
+
+            var page3Fields = new List<FieldData>()
+            {
+                new FieldData("Amount Of People Inside", document.AmountOfPeopleInStomach.ToString(), true),
+                new FieldData("Capacity", document.StomachCapacity.ToString(), true),
+            };
+
+            #endregion
+
+            var embeds = new Dictionary<uint, DiscordEmbed>()
+            {
+                {
+                    0,
+                    Utils.MakeEmbed(DiscordColor.Cyan, $"{BASE_TITLE} - Balance", fields: page1Fields)
+                },
+                {
+                    1,
+                    Utils.MakeEmbed(DiscordColor.Cyan, $"{BASE_TITLE} - Items", fields: page2Fields)
+                },
+                {
+                    2,
+                    Utils.MakeEmbed(DiscordColor.Cyan, $"{BASE_TITLE} - Stomach Stats", fields: page3Fields)
+                }
+            };
+
+            uint pageNumber = 1;
+            uint maxPages = (uint)embeds.Count;
+            var embed = Utils.LoadPage(embeds, pageNumber - 1);
+
+            var buttons = new DiscordButtonComponent[]
+            {
+                new DiscordButtonComponent(ButtonStyle.Danger, PREVIOUS_BUTTON_ID, PREVIOUS_BUTTON_LABEL, pageNumber == 1, new DiscordComponentEmoji("◀️")),
+                new DiscordButtonComponent(ButtonStyle.Success, NEXT_BUTTON_ID, NEXT_BUTTON_LABEL, pageNumber == maxPages, new DiscordComponentEmoji("▶️"))
+            };
+
+            await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddComponents(buttons).AddEmbed(embed));
+
+            #region Interaction Collector
+
+            AsyncEventHandler<DiscordClient, ComponentInteractionCreateEventArgs> interactionCollector = async (s, e) =>
+            {
+                if (e.User.Id != ctx.User.Id) return;
+
+                if (e.Id == NEXT_BUTTON_ID)
+                {
+                    pageNumber += 1;
+                    embed = Utils.LoadPage(embeds, pageNumber - 1);
+                    buttons = new DiscordButtonComponent[]
+                    {
+                        new DiscordButtonComponent(ButtonStyle.Danger, PREVIOUS_BUTTON_ID, PREVIOUS_BUTTON_LABEL, pageNumber == 1, new DiscordComponentEmoji("◀️")),
+                        new DiscordButtonComponent(ButtonStyle.Success, NEXT_BUTTON_ID, NEXT_BUTTON_LABEL, pageNumber == maxPages, new DiscordComponentEmoji("▶️"))
+                    };
+
+                    await e.Interaction.CreateResponseAsync(InteractionResponseType.UpdateMessage, new DiscordInteractionResponseBuilder().AddComponents(buttons).AddEmbed(embed));
+                }
+                else if (e.Id == "previous-page-userinfo")
+                {
+                    pageNumber -= 1;
+                    embed = Utils.LoadPage(embeds, pageNumber - 1);
+                    buttons = new DiscordButtonComponent[]
+                    {
+                        new DiscordButtonComponent(ButtonStyle.Danger, PREVIOUS_BUTTON_ID, PREVIOUS_BUTTON_LABEL, pageNumber == 1, new DiscordComponentEmoji("◀️")),
+                        new DiscordButtonComponent(ButtonStyle.Success, NEXT_BUTTON_ID, NEXT_BUTTON_LABEL, pageNumber == maxPages, new DiscordComponentEmoji("▶️"))
+                    };
+
+                    await e.Interaction.CreateResponseAsync(InteractionResponseType.UpdateMessage, new DiscordInteractionResponseBuilder().AddComponents(buttons).AddEmbed(embed));
+                }
+            };
+
+            #endregion
+
+            ctx.Client.ComponentInteractionCreated += interactionCollector;
+
+            await Task.Delay(180 * 1000);
+
+            var finalFields = new List<FieldData>();
+
+            foreach (var field in embed.Fields) finalFields.Add(new FieldData(field.Name, field.Value, field.Inline));
+
+            embed = Utils.MakeEmbed(DiscordColor.Yellow, embed.Title, "This interaction collector has expired, please run this command again to see another page.", fields: finalFields);
+
+            buttons = new DiscordButtonComponent[]
+            {
+                new DiscordButtonComponent(ButtonStyle.Danger, PREVIOUS_BUTTON_ID, PREVIOUS_BUTTON_LABEL, true, new DiscordComponentEmoji("◀️")),
+                new DiscordButtonComponent(ButtonStyle.Success, NEXT_BUTTON_ID, NEXT_BUTTON_LABEL, true, new DiscordComponentEmoji("▶️"))
+            };
+
+            ctx.Client.ComponentInteractionCreated -= interactionCollector;
+
+            await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddComponents(buttons).AddEmbed(embed));
         }
     }
 }

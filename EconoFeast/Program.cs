@@ -2,11 +2,13 @@
 
 using DSharpPlus.SlashCommands;
 
+using Radarcord;
+
 using Supabase;
 
-using ThingBot.Commands;
+using EconoFeast.Commands;
 
-namespace ThingBot
+namespace EconoFeast
 {
     public class Program
     {
@@ -14,15 +16,13 @@ namespace ThingBot
 
         private async Task StartBot()
         {
-            Configuration config;
-
             try
             {
-                config = await Utils.GetConfigurationAsync();
+                Globals.Configuration = await Utils.GetConfigurationAsync();
             }
             catch (Exception)
             {
-                Logger.Error("Couldn't get config so we can't start the bot! Exiting...");
+                Logger.Error("Couldn't get configuration so we can't start the bot! Exiting...");
                 Environment.Exit(1);
                 return;
             }
@@ -31,11 +31,11 @@ namespace ThingBot
 
             var discord = new DiscordClient(new DiscordConfiguration()
             {
-                Token = config.Token,
+                Token = Globals.Configuration.Token,
                 TokenType = TokenType.Bot,
                 Intents = DiscordIntents.AllUnprivileged,
             });
-            Globals.SupabaseClient = new(config.SupabaseUrl, config.SupabaseKey, new SupabaseOptions()
+            Globals.SupabaseClient = new(Globals.Configuration.SupabaseUrl, Globals.Configuration.SupabaseKey, new SupabaseOptions()
             {
                 AutoConnectRealtime = true,
             });
@@ -66,19 +66,24 @@ namespace ThingBot
 
             Logger.Success("Connected to Discord!");
 
-            await ActivityLoopAsync(sender);
+            var radar = new RadarcordClient(sender, Globals.Configuration.RadarcordKey);
+            
+            await radar.PostStatsAsync();
+
+            while (true)
+            {
+                await UpdateActivityAsync(sender);
+
+                await Task.Delay(15 * 1000);
+            }
         }
 
-        private async Task ActivityLoopAsync(DiscordClient client)
+        private async Task UpdateActivityAsync(DiscordClient client)
         {
             var random = new Random();
             var activity = Globals.Activities[random.Next(Globals.Activities.Count)];
 
             await client.UpdateStatusAsync(activity);
-
-            await Task.Delay(15 * 1000);
-
-            await ActivityLoopAsync(client);
         }
     }
 }

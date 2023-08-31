@@ -1,7 +1,7 @@
 ﻿using DSharpPlus.Entities;
 using Supabase;
 
-namespace ThingBot
+namespace EconoFeast
 {
     public static class Globals
     {
@@ -25,6 +25,7 @@ namespace ThingBot
             new DiscordActivity("the users duke it out", ActivityType.Watching)
         };
         public static List<ulong> NonParticipatingUsers { get; } = new();
+        public static Configuration Configuration { get; set; }
 
         #endregion
     }

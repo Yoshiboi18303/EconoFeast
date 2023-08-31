@@ -1,4 +1,4 @@
-﻿namespace ThingBot;
+﻿namespace EconoFeast;
 
 internal static class Logger
 {

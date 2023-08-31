@@ -1,4 +1,4 @@
-﻿namespace ThingBot.Attributes;
+﻿namespace EconoFeast.Attributes;
 
 /// <summary>
 /// Marks a CommandModule as a guild only module.

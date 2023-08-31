@@ -24,6 +24,10 @@ Just make sure the bot has been invited with the `applications.commands` scope t
 - Thank you to Scorprian for giving me the profile picture for the bot.
 - Thank you to my friends for supporting me with this idea.
 
+## Trello Board
+
+**EconoFeast** comes with a Trello board to tell you my progress on new features of the bot! **[Click this](https://trello.com/b/ge5BY46u/econofeast)** to view the board!
+
 ---
 
 I hope you guys enjoy this bot!

@@ -6,7 +6,7 @@ using Newtonsoft.Json;
 
 using System.Linq.Expressions;
 
-namespace ThingBot
+namespace EconoFeast
 {
     #region Data Classes
 
@@ -24,6 +24,14 @@ namespace ThingBot
         }
     }
 
+    public class ItemPrice
+    {
+        [JsonProperty("id")]
+        public string Id { get; set; }
+        [JsonProperty("price")]
+        public ulong Price { get; set; }
+    }
+
     public class Configuration
     {
         [JsonProperty("token")]
@@ -32,6 +40,10 @@ namespace ThingBot
         public string SupabaseUrl { get; set; }
         [JsonProperty("supabase_key")]
         public string SupabaseKey { get; set; }
+        [JsonProperty("radarcord_key")]
+        public string RadarcordKey { get; set; }
+        [JsonProperty("item_prices")]
+        public List<ItemPrice> Prices { get; set; }
     }
 
     #endregion
@@ -92,13 +104,15 @@ namespace ThingBot
         public static Dictionary<string, ShopItem> SetupItems()
         {
             var items = new Dictionary<string, ShopItem>();
+            var prices = Globals.Configuration.Prices;
 
             // Make variables for each item.
-            var item1 = new ShopItem("competition", "Eating Competition", "Engage in an eating competition to increase your stomach capacity!", 750);
-            var item2 = new ShopItem("lube", "Lube", "Apply it all over yourself to make it easier to crawl out of someone!", 550);
-            var item3 = new ShopItem("medicine", "Digestion Medicine", "Use this to make your stomach digest bone slower than anything else!", 900);
-            var item4 = new ShopItem("acid", "Acid Spit", "Use this to melt someone's skin clean off (it'll grow back eventually)!", 1250);
-            var item5 = new ShopItem("poison", "Rat Poison", "Use this to protect yourself from a predator!", 2250);
+            var item1 = new ShopItem("competition", "Eating Competition", "Engage in an eating competition to increase your stomach capacity!", prices[0].Price);
+            var item2 = new ShopItem("lube", "Lube", "Apply it all over yourself to make it easier to crawl out of someone!", prices[1].Price);
+            var item3 = new ShopItem("medicine", "Digestion Medicine", "Use this to make your stomach digest bone slower than anything else!", prices[2].Price);
+            var item4 = new ShopItem("acid", "Acid Spit", "Use this to melt someone's skin clean off (it'll grow back eventually)!", prices[3].Price);
+            var item5 = new ShopItem("poison", "Rat Poison", "Use this to protect yourself from a predator!", prices[4].Price);
+            var item6 = new ShopItem("revealer", "Secret Revealer", "View any secret fields in the userinfo command", prices[5].Price);
 
             // Set up purchase handlers.
             item1.Purchased += Item1_Purchased;
@@ -106,6 +120,7 @@ namespace ThingBot
             item3.Purchased += AddItemToUser;
             item4.Purchased += AddItemToUser;
             item5.Purchased += AddItemToUser;
+            item6.Purchased += AddItemToUser;
 
             // Add items to our dictionary.
             items.Add(item1.Id, item1);
@@ -113,6 +128,7 @@ namespace ThingBot
             items.Add(item3.Id, item3);
             items.Add(item4.Id, item4);
             items.Add(item5.Id, item5);
+            items.Add(item6.Id, item6);
 
             return items;
         }
@@ -208,7 +224,6 @@ namespace ThingBot
 
         public static async Task<Configuration> GetConfigurationAsync()
         {
-
             try
             {
                 string path = string.Empty;
@@ -270,7 +285,8 @@ namespace ThingBot
                         AcidSpit = 0,
                         DigestionMedicine = 0,
                         Lube = 0,
-                        RatPoison = 0
+                        RatPoison = 0,
+                        SecretRevealer = 0
                     },
                     PeopleInStomach = new List<string>(),
                     AmountOfBonesCollected = 0,
@@ -310,6 +326,19 @@ namespace ThingBot
         public static async Task<User> GetUserAsync(DiscordUser user)
         {
             return await GetUserAsync(user.Id.ToString());
+        }
+
+        public static async Task<List<User>> GetAllUsersAsync()
+        {
+            var supabase = Globals.SupabaseClient;
+
+            var response = await supabase
+                .From<User>()
+                .Get();
+
+            var users = response.Models ?? throw new Exception("No models received from the database.");
+
+            return users;
         }
 
         #endregion
@@ -391,11 +420,6 @@ namespace ThingBot
 
         #region Other Methods
 
-        public static async Task DeferAsync(InteractionContext context)
-        {
-            await context.CreateResponseAsync(InteractionResponseType.DeferredChannelMessageWithSource);
-        }
-
         public static T EvaluateBool<T>(bool boolToEvaluate, T ifTrue, T ifFalse)
         {
             return boolToEvaluate ? ifTrue : ifFalse;
@@ -404,7 +428,7 @@ namespace ThingBot
         public static string MakeFirstCharacterUppercase(string str)
         {
             var restOfString = str[1..];
-            return $"{str[1]}".ToUpper() + restOfString;
+            return $"{str[0]}".ToUpper() + restOfString;
         }
 
         /// <summary>
@@ -443,7 +467,7 @@ namespace ThingBot
         private static async void Item1_Purchased(object? sender, ItemPurchaseEventArgs e)
         {
             var random = new Random();
-            var stomachCapacityIncrease = Convert.ToUInt64(Math.Ceiling(Convert.ToDecimal(GetRandomDouble(20, random))));
+            var stomachCapacityIncrease = Convert.ToUInt64(Math.Ceiling(Convert.ToDecimal(GetRandomDouble(Convert.ToUInt32(20 * e.Quantity), random))));
 
             await UpdateUserAsync(e.PurchasingUser.Id, x => x.StomachCapacity, e.PurchasingUser.StomachCapacity + stomachCapacityIncrease);
         }
@@ -459,19 +483,19 @@ namespace ThingBot
                 {
                     AcidSpit = user.Items.AcidSpit,
                     DigestionMedicine = user.Items.DigestionMedicine,
-                    Lube = user.Items.Lube + 1,
+                    Lube = user.Items.Lube + Convert.ToUInt64(1 * e.Quantity),
                     RatPoison = user.Items.RatPoison
                 },
                 "medicine" => new ItemAmounts()
                 {
                     AcidSpit = user.Items.AcidSpit,
-                    DigestionMedicine = user.Items.DigestionMedicine + 1,
+                    DigestionMedicine = user.Items.DigestionMedicine + Convert.ToUInt64(1 * e.Quantity),
                     Lube = user.Items.Lube,
                     RatPoison = user.Items.RatPoison
                 },
                 "acid" => new ItemAmounts()
                 {
-                    AcidSpit = user.Items.AcidSpit + 1,
+                    AcidSpit = user.Items.AcidSpit + Convert.ToUInt64(1 * e.Quantity),
                     DigestionMedicine = user.Items.DigestionMedicine,
                     Lube = user.Items.Lube,
                     RatPoison = user.Items.RatPoison
@@ -481,7 +505,15 @@ namespace ThingBot
                     AcidSpit = user.Items.AcidSpit,
                     DigestionMedicine = user.Items.DigestionMedicine,
                     Lube = user.Items.Lube,
-                    RatPoison = user.Items.RatPoison + 1
+                    RatPoison = user.Items.RatPoison + Convert.ToUInt64(1 * e.Quantity)
+                },
+                "revealer" => new ItemAmounts()
+                {
+                    AcidSpit = user.Items.AcidSpit,
+                    DigestionMedicine = user.Items.DigestionMedicine,
+                    Lube = user.Items.Lube,
+                    RatPoison = user.Items.RatPoison,
+                    SecretRevealer = user.Items.SecretRevealer + Convert.ToUInt64(1 * e.Quantity)
                 },
                 _ => throw new ArgumentException("Invalid item id provided.")
             };

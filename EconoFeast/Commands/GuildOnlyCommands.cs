@@ -1,7 +1,7 @@
 ﻿using DSharpPlus.Entities;
 using DSharpPlus.SlashCommands;
 
-namespace ThingBot.Commands
+namespace EconoFeast.Commands
 {
     [Attributes.GuildOnly]
     [SlashCommandGroup("testing", "Some commands that have to be tested.")]

@@ -1,7 +1,7 @@
 ﻿using DSharpPlus.Entities;
 using DSharpPlus.SlashCommands;
 
-namespace ThingBot.Commands
+namespace EconoFeast.Commands
 {
     [SlashCommandGroup("info", "Information commands, for info.")]
     public class InfoCommands : ApplicationCommandModule
@@ -9,7 +9,7 @@ namespace ThingBot.Commands
         [SlashCommand("ping", "Gets the latency of the bot")]
         public async Task PingCommand(InteractionContext ctx)
         {
-            await Utils.DeferAsync(ctx); // Put the bot into a "thinking" state, giving us 15 minutes to make the embed and return it.
+            await ctx.DeferAsync(); // Put the bot into a "thinking" state, giving us 15 minutes to make the embed and return it.
 
             var fields = new List<FieldData>()
             {
@@ -23,12 +23,11 @@ namespace ThingBot.Commands
         [SlashCommand("botinfo", "View the information of the bot.")]
         public async Task BotInformationCommand(InteractionContext ctx)
         {
-            await Utils.DeferAsync(ctx);
-
+            await ctx.DeferAsync();
+            
             var timeFromStartup = DateTime.Now - Globals.StartDate;
             var client = ctx.Client;
             var daysFromStartup = (int)timeFromStartup.TotalDays;
-            DateTimeOffset timestamp = new(new DateTime(Globals.StartDate.Year, Globals.StartDate.Month, timeFromStartup.Days, timeFromStartup.Hours, timeFromStartup.Minutes, timeFromStartup.Seconds, timeFromStartup.Milliseconds, timeFromStartup.Microseconds));
 
             var fields = new List<FieldData>()
             {
@@ -38,10 +37,9 @@ namespace ThingBot.Commands
                 new FieldData("C# Version", "v11.0", true),
                 new FieldData("Discord API Wrapper", Utils.MakeMarkdownLink("DSharpPlus", "https://dsharpplus.github.io", MarkdownFormat.Bolded), true)
             };
-            var embed = Utils.MakeEmbed(DiscordColor.Cyan, $"{client.CurrentUser.Username} Info", fields: fields, timestamp: timestamp);
+            var embed = Utils.MakeEmbed(DiscordColor.Cyan, $"{client.CurrentUser.Username} Info", fields: fields);
 
             await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(embed));
-
         }
     }
 }
