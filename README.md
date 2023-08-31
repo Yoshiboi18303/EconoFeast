@@ -16,7 +16,7 @@ Just make sure the bot has been invited with the `applications.commands` scope t
 
 - **Made With:** C#
 - **API Wrapper:** [DSharpPlus](https://dsharpplus.github.io)
-- **Installed Packages:** `DSharpPlus`, `DSharpPlus.SlashCommands`, `Newtonsoft.Json`, `Radarcord.NET` _(which will be used soon)_, `supabase-csharp`
+- **Installed Packages:** `DSharpPlus`, `DSharpPlus.SlashCommands`, `Newtonsoft.Json`, `Radarcord.NET`, `supabase-csharp`
 - **IDE Used:** [Visual Studio 2022 - Community Edition](https://visualstudio.microsoft.com/vs/community/)
 
 ## Special Thanks
