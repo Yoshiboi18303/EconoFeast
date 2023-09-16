@@ -6,6 +6,11 @@ namespace EconoFeast.Commands
     [SlashCommandGroup("info", "Information commands, for info.")]
     public class InfoCommands : ApplicationCommandModule
     {
+        public override async Task<bool> BeforeSlashExecutionAsync(InteractionContext ctx)
+        {
+            return await Utils.PreFlightChecks(ctx);
+        }
+
         [SlashCommand("ping", "Gets the latency of the bot")]
         public async Task PingCommand(InteractionContext ctx)
         {
@@ -24,7 +29,7 @@ namespace EconoFeast.Commands
         public async Task BotInformationCommand(InteractionContext ctx)
         {
             await ctx.DeferAsync();
-            
+
             var timeFromStartup = DateTime.Now - Globals.StartDate;
             var client = ctx.Client;
             var daysFromStartup = (int)timeFromStartup.TotalDays;
@@ -39,6 +44,19 @@ namespace EconoFeast.Commands
             };
             var embed = Utils.MakeEmbed(DiscordColor.Cyan, $"{client.CurrentUser.Username} Info", fields: fields);
 
+            await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(embed));
+        }
+
+        [SlashCommand("privacy", "View the privacy policy of the bot")]
+        public async Task GetPrivacyPolicyCommand(InteractionContext ctx)
+        {
+            await ctx.DeferAsync(true);
+
+            var privacyFilePath = @"C:\Users\yoshi\OneDrive\Desktop\EconoFeast\PRIVACY-FOR-DISCORD.md";
+
+            var privacyFileContents = await File.ReadAllTextAsync(privacyFilePath);
+
+            var embed = Utils.MakeEmbed(DiscordColor.Cyan, description: privacyFileContents);
             await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(embed));
         }
     }

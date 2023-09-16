@@ -14,6 +14,20 @@
         }
     }
 
+    public class ItemSoldEventArgs
+    {
+        public User SellingUser { get; }
+        public ShopItem Item { get; }
+        public int Quantity { get; }
+
+        public ItemSoldEventArgs(User sellingUser, ShopItem item, int quantity)
+        {
+            SellingUser = sellingUser;
+            Item = item;
+            Quantity = quantity;
+        }
+    }
+
     public enum ItemPurchaseFailureReason
     {
         None,
@@ -41,6 +55,8 @@
         private string _name;
         private string _description;
         private ulong _price;
+        private bool _isSinglePurchaseOnly;
+        private bool _sellable;
 
         /// <summary>
         /// Gets the id of this ShopItem.
@@ -50,12 +66,12 @@
         /// Gets or sets the name of this ShopItem.
         /// </summary>
         public string Name
-        { 
+        {
             get => _name;
             set {
                 if (string.IsNullOrWhiteSpace(value)) throw new ArgumentNullException(nameof(value), "Value of Name can't be null, empty or just a whitespace!");
                 _name = value;
-            } 
+            }
         }
         /// <summary>
         /// Gets or sets the description of this ShopItem.
@@ -81,20 +97,44 @@
                 _price = value;
             }
         }
+        /// <summary>
+        /// Gets or sets whether or not this ShopItem can have a quantity greater than 1.
+        /// </summary>
+        public bool IsSinglePurchaseOnly
+        {
+            get => _isSinglePurchaseOnly;
+            set => _isSinglePurchaseOnly = value;
+        }
+        /// <summary>
+        /// Gets or sets whether or not this ShopItem can be sold.
+        /// </summary>
+        public bool Sellable
+        {
+            get => _sellable;
+            set => _sellable = value;
+        }
 
         public event EventHandler<ItemPurchaseEventArgs>? Purchased;
+        public event EventHandler<ItemSoldEventArgs>? Sold;
 
         protected virtual void OnPurchased(ItemPurchaseEventArgs args)
         {
             Purchased?.Invoke(this, args);
         }
 
-        public ShopItem(string id, string name, string description, ulong price)
+        protected virtual void OnSold(ItemSoldEventArgs args)
+        {
+            Sold?.Invoke(this, args);
+        }
+
+        public ShopItem(string id, string name, string description, ulong price, bool isSinglePurchaseOnly = false, bool sellable = true)
         {
             _id = id;
             _name = name;
             _description = description;
             _price = price;
+            _isSinglePurchaseOnly = isSinglePurchaseOnly;
+            _sellable = sellable;
         }
 
         /// <summary>
@@ -118,6 +158,23 @@
                 return new ItemPurchaseResult(true, "Successfully purchased item.", ItemPurchaseFailureReason.None);
             }
             else return new ItemPurchaseResult(false, "User doesn't have enough bones to buy this item.", ItemPurchaseFailureReason.InsuffientFunds);
+        }
+
+        /// <summary>
+        /// Sells this item, giving them half of the price back, then invoke the Sold event.
+        /// </summary>
+        /// <param name="user">The user</param>
+        /// <param name="quantity">How many of this item to sell</param>
+        /// <exception cref="ArgumentException"></exception>
+        public async Task SellAsync(User user, int quantity = 1)
+        {
+            if (quantity < 1) throw new ArgumentException("Quantity cannot be less than 1!", nameof(quantity));
+
+            var bonesCollected = user.AmountOfBonesCollected;
+            var price = (Price * Convert.ToUInt64(quantity)) / 2;
+
+            await Utils.UpdateUserAsync(user.Id, x => x.AmountOfBonesCollected, bonesCollected + price);
+            OnSold(new ItemSoldEventArgs(user, this, quantity));
         }
     }
 }

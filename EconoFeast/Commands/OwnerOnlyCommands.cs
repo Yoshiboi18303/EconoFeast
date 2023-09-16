@@ -1,6 +1,8 @@
 ﻿using DSharpPlus.Entities;
 using DSharpPlus.SlashCommands;
 using Newtonsoft.Json;
+using Radarcord.Errors;
+using System.Text;
 
 namespace EconoFeast.Commands
 {
@@ -32,6 +34,7 @@ namespace EconoFeast.Commands
                     Lube = user.Items.Lube,
                     RatPoison = user.Items.RatPoison,
                     SecretRevealer = user.Items.SecretRevealer,
+                    SuperCrystal = user.Items.SuperCrystal
                 });
             }
 
@@ -108,7 +111,7 @@ namespace EconoFeast.Commands
             var prices = currentConfig.Prices;
 
             ShopItem item;
-            
+
             try
             {
                 item = Globals.Items[id];
@@ -144,7 +147,11 @@ namespace EconoFeast.Commands
                 SupabaseKey = currentConfig.SupabaseKey,
                 SupabaseUrl = currentConfig.SupabaseUrl,
                 RadarcordKey = currentConfig.RadarcordKey,
-                Prices = newPrices
+                TrelloKey = currentConfig.TrelloKey,
+                TrelloToken = currentConfig.TrelloToken,
+                Prices = newPrices,
+                OptedOutUserIds = currentConfig.OptedOutUserIds,
+                VCodesKey = currentConfig.VCodesKey
             };
 
             var serialized = JsonConvert.SerializeObject(config, Formatting.Indented);
@@ -173,6 +180,123 @@ namespace EconoFeast.Commands
             Globals.Items = Utils.SetupItems();
 
             await ctx.EditResponseAsync(new DiscordWebhookBuilder().WithContent($"Done! **{item.Name}**'s price has been updated from **{oldPrice}** bones to **{price}** bones!"));
+        }
+
+        [SlashCommand("announce", "Announce something to all servers that have subscribed to notifications")]
+        public async Task AnnounceCommand(InteractionContext ctx, [Option("message", "The message to send to all subscribed channels")] string message)
+        {
+            if (!Utils.UserIsOwner(ctx.User))
+            {
+                var errorEmbed = Utils.MakeEmbed(DiscordColor.Red, "Error", "You are not the owner of the bot!");
+                await ctx.CreateResponseAsync(new DiscordInteractionResponseBuilder().AddEmbed(errorEmbed));
+                return;
+            }
+
+            var announcingEmbed = Utils.MakeEmbed(DiscordColor.Cyan, "Please wait", "Announcing message to all subscribed channel, please wait...");
+            var doneEmbed = Utils.MakeEmbed(DiscordColor.Green, "Done", "Message announced!");
+            await ctx.CreateResponseAsync(new DiscordInteractionResponseBuilder().AddEmbed(announcingEmbed));
+
+            await Utils.AnnounceAsync(message, ctx.Client);
+
+            await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(doneEmbed));
+        }
+
+        [SlashCommand("blacklist", "Blacklist or un-blacklist a user!")]
+        public async Task BlacklistCommand(InteractionContext ctx, [Option("id", "The ID of the user to (un-)blacklist")] string id /* string is used over DiscordUser to let me blacklist people from a different guild */, [Option("status", "Whether or not to blacklist the user")] bool blacklisted)
+        {
+            if (!Utils.UserIsOwner(ctx.User))
+            {
+                var errorEmbed = Utils.MakeEmbed(DiscordColor.Red, "Error", "You are not the owner of the bot!");
+                await ctx.CreateResponseAsync(new DiscordInteractionResponseBuilder().AddEmbed(errorEmbed));
+                return;
+            }
+
+            await ctx.DeferAsync();
+
+            var user = await ctx.Client.GetUserAsync(Convert.ToUInt64(id));
+            await Utils.GetUserAsync(user);
+
+            await Utils.UpdateUserAsync(user, x => x.IsBlacklisted, blacklisted);
+            var statusText = Utils.EvaluateBool(blacklisted, "Blacklisted", "Un-blacklisted");
+
+            var embed = Utils.MakeEmbed(DiscordColor.Cyan, statusText, $"<@{user.Id}> ({user.Username}) was {statusText.ToLower()}!");
+            await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(embed));
+        }
+
+        [SlashCommand("post", "Manually post stats to Radarcord")]
+        public async Task PostCommand(InteractionContext ctx)
+        {
+            if (!Utils.UserIsOwner(ctx.User))
+            {
+                var errorEmbed = Utils.MakeEmbed(DiscordColor.Red, "Error", "You are not the owner of the bot!");
+                await ctx.CreateResponseAsync(new DiscordInteractionResponseBuilder().AddEmbed(errorEmbed));
+                return;
+            }
+
+            await ctx.DeferAsync();
+
+            var radar = Globals.GetRadarcordClient(ctx.Client);
+
+            var successEmbed = Utils.MakeEmbed(DiscordColor.Green, "Success", "Stats posted to Radarcord!");
+
+            try
+            {
+                await radar.PostStatsAsync();
+                await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(successEmbed));
+            }
+            catch (RadarcordException ex)
+            {
+                var errorEmbed = Utils.MakeErrorEmbed($"Failed to post stats to Radarcord!\n\nException:\n```\n{ex.Message}\n```");
+                await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(errorEmbed));
+            }
+        }
+
+        [SlashCommand("create_lore", "Create a new lore entry")]
+        public async Task CreateLoreCommand(InteractionContext ctx, [Option("name", "The name of the lore entry")] string name, [Option("lore_file", "The path to the lore file")] string loreFilePath)
+        {
+            if (!Utils.UserIsOwner(ctx.User))
+            {
+                var errorEmbed = Utils.MakeEmbed(DiscordColor.Red, "Error", "You are not the owner of the bot!");
+                await ctx.CreateResponseAsync(new DiscordInteractionResponseBuilder().AddEmbed(errorEmbed));
+                return;
+            }
+
+            await ctx.DeferAsync(true);
+
+            // Generate a random 10 to 20 digit ID, check if it already exists, if it does, try again.
+            // If it doesn't, read the file path provided (which will be in the JSON format), and deserialize it into an array of LoreEntry objects.
+            // Then send it to the database.
+
+            var random = new Random();
+            var id = string.Empty;
+
+            var generatingEmbed = Utils.MakeEmbed(DiscordColor.Yellow, "Generating ID", "Generating a random ID for the lore entry, please wait...\n\n**This could take a while...**");
+            await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(generatingEmbed));
+
+            while (true)
+            {
+                id = string.Empty;
+
+                for (int i = 0; i < random.Next(10, 20); i++)
+                {
+                    id += random.Next(0, 10);
+                }
+
+                var exists = await Utils.LoreEntryExistsAsync(id);
+
+                if (!exists) break;
+            }
+
+            // Encode the id in Base64
+            var base64Id = Convert.ToBase64String(Encoding.UTF8.GetBytes(id));
+
+            var loreFileContents = await File.ReadAllTextAsync(loreFilePath);
+            var loreEntries = JsonConvert.DeserializeObject<List<LoreData>>(loreFileContents);
+
+            await Utils.CreateLoreEntryAsync(id, name, loreEntries!);
+
+            var embed = Utils.MakeEmbed(DiscordColor.Green, "Success", $"Lore entry **{name}** created!\n\n**Use this Base64 ID to send to users:** `{base64Id}`");
+            await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(embed));
         }
     }
 }

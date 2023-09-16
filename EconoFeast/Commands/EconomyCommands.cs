@@ -1,10 +1,7 @@
 ﻿using DSharpPlus;
-
 using DSharpPlus.AsyncEvents;
-
 using DSharpPlus.Entities;
 using DSharpPlus.EventArgs;
-
 using DSharpPlus.SlashCommands;
 using DSharpPlus.SlashCommands.Attributes;
 
@@ -15,23 +12,38 @@ namespace EconoFeast.Commands
     [SlashCommandGroup("economy", "The main part of the bot!")]
     public class EconomyCommands : ApplicationCommandModule
     {
+        public override async Task<bool> BeforeSlashExecutionAsync(InteractionContext ctx)
+        {
+            return await Utils.PreFlightChecksWithOptOut(ctx);
+        }
+
         [SlashCommand("eat", "Turn a user into your meal, this can only be done 1 time every 3 minutes.")]
-        [SlashCooldown(1, 180.0, SlashCooldownBucketType.User)] // This'll be updated with 3 uses per day eventually.
+        [SlashCooldown(1, 180, SlashCooldownBucketType.User)]
         public async Task EatUserCommand(InteractionContext ctx, [Option("user", "The user to target")] DiscordUser userToEat)
         {
             await ctx.DeferAsync();
 
+            var currentGuild = await Utils.GetGuildAsync(ctx.Guild);
+
             #region Checks
+
+            if (Globals.Configuration.OptedOutUserIds.Contains(userToEat.Id))
+            {
+                var errorEmbed = Utils.MakeErrorEmbed($"{userToEat.Username} has opted out of the bot, you cannot eat them!");
+                await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(errorEmbed));
+                return;
+            }
+
             if (userToEat.IsBot)
             {
-                var errorEmbed = Utils.MakeErrorEmbed("You can't just eat my kind, what have they done to you?");
+                var errorEmbed = Utils.MakeErrorEmbed($"You can't just eat my kind, what in the holy {Utils.LanguageFilter(ctx.Guild, "heck", "hell")} have they done to you?");
                 await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(errorEmbed));
                 return;
             }
 
             if (userToEat.Id == ctx.User.Id)
             {
-                var errorEmbed = Utils.MakeErrorEmbed("You can't just eat yourself, what do you think this is?");
+                var errorEmbed = Utils.MakeErrorEmbed($"You can't just eat yourself, what the {Utils.LanguageFilter(ctx.Guild, "flip", "fuck")} do you think this is?!");
                 await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(errorEmbed));
                 return;
             }
@@ -39,26 +51,25 @@ namespace EconoFeast.Commands
             var currentUser = await Utils.GetUserAsync(ctx.User);
             var targetUser = await Utils.GetUserAsync(userToEat);
 
-            // TODO: Fix the following piece of code later.
-            /*
-            if (currentUser.LastMealTime is not null)
+            if (currentUser.LastMealTime.HasValue)
             {
-                var timeBetween = DateTime.Now.AddMinutes(3) - currentUser.LastMealTime;
+                Logger.Info("User has a last meal time.");
 
-                Console.WriteLine(timeBetween);
+                var timeBetween = (DateTime.Now - currentUser.LastMealTime).Value;
 
-                if (timeBetween.Value.TotalMinutes < 3)
+                if (timeBetween.TotalMinutes < 3)
                 {
                     var errorEmbed = Utils.MakeErrorEmbed("You should calm it, there needs to be 3 minutes between your last person. Sorry, I don't make the rules.");
                     await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(errorEmbed));
                     return;
                 }
             }
-            */
 
             if (currentUser.IsInStomach)
             {
-                var errorEmbed = Utils.MakeErrorEmbed("You're inside of someone, you can't do anything while you're inside of them!");
+                var captor = Utils.GetCaptorAsync(currentUser);
+                var captorDiscord = await ctx.Client.GetUserAsync(Convert.ToUInt64(captor.Id));
+                var errorEmbed = Utils.MakeErrorEmbed($"You're inside of {captorDiscord.Username}, you can't do anything while you're inside of them!");
                 await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(errorEmbed));
                 return;
             }
@@ -72,16 +83,67 @@ namespace EconoFeast.Commands
 
             if (targetUser.IsInStomach)
             {
-                var errorEmbed = Utils.MakeErrorEmbed($"{userToEat.Username} is already inside of someone, you cannot eat them while someone else has them!");
+                var captor = await Utils.GetCaptorAsync(targetUser);
+                var captorDiscord = await ctx.Client.GetUserAsync(Convert.ToUInt64(captor!.Id));
+                var errorEmbed = Utils.MakeErrorEmbed($"{userToEat.Username} is inside of {captorDiscord.Username}, you cannot eat them while someone else has them!");
                 await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(errorEmbed));
                 return;
             }
 
-            if (!targetUser.CanBeEaten || Globals.NonParticipatingUsers.Contains(userToEat.Id))
+            if (!targetUser.CanBeEaten)
             {
-                var errorEmbed = Utils.MakeErrorEmbed($"{userToEat.Username} has opted out of the bot, you cannot eat them!");
+                var errorEmbed = Utils.MakeErrorEmbed($"{userToEat.Username} has opted out of being eaten!");
                 await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(errorEmbed));
                 return;
+            }
+
+            // Final check, ensure the targeted user doesn't have one of the Rat Poison item.
+            // If they do, check whether to give all the bones within the end user to the targetted user.
+
+            if (targetUser.Items.RatPoison > 0)
+            {
+                if (currentUser.AmountOfBonesInStomach == 0)
+                {
+                    var embed1 = Utils.MakeEmbed(DiscordColor.Black, description: $"Looks like {userToEat.Username} had some rat poison, but you have zero bones inside of you, so no one gets anything.\n\n**To `{userToEat.Username}`**, you have not lost your item due to fairness.", footer: new DiscordEmbedBuilder.EmbedFooter()
+                    {
+                        Text = "I may be here to watch chaos break out, but I have to be fair."
+                    });
+                    await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(embed1));
+                    return;
+                }
+
+                var newItemAmounts = new ItemAmounts()
+                {
+                    AcidSpit = targetUser.Items.AcidSpit,
+                    DigestionMedicine = targetUser.Items.DigestionMedicine,
+                    Lube = targetUser.Items.Lube,
+                    RatPoison = targetUser.Items.RatPoison - 1,
+                    SecretRevealer = targetUser.Items.SecretRevealer
+                };
+                await Utils.UpdateUserAsync(userToEat, x => x.Items, newItemAmounts);
+                var random1 = new Random();
+
+                if (random1.NextDouble() >= 0.69 /* Nice. */)
+                {
+                    // End user keeps their bones.
+                    var embed2 = Utils.MakeEmbed(DiscordColor.Yellow, description: $"{userToEat.Username} had some rat poison, however you got to keep your bones!");
+                    await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(embed2));
+                    return;
+                }
+                else
+                {
+                    // Targetted user gets the bones the end user had.
+                    var embed3 = Utils.MakeEmbed(DiscordColor.Red, description: $"{userToEat.Username} had some rat poison, and looks like they're making away with all the bones that were in you!", footer: new DiscordEmbedBuilder.EmbedFooter()
+                    {
+                        Text = "Might I suggest extracting? Might save you next time!"
+                    });
+
+                    await Utils.UpdateUserAsync(ctx.User, x => x.AmountOfBonesInStomach, Convert.ToUInt64(0));
+                    await Utils.UpdateUserAsync(userToEat, x => x.AmountOfBonesCollected, targetUser.AmountOfBonesCollected + currentUser.AmountOfBonesInStomach);
+
+                    await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(embed3));
+                    return;
+                }
             }
 
             #endregion
@@ -91,12 +153,12 @@ namespace EconoFeast.Commands
             var peopleInStomachList = currentUser.PeopleInStomach;
             peopleInStomachList.Add(targetUser.Id);
 
-            // Make value update lists.
+            // Set up value update lists.
             var currentUserValues = new List<object>()
             {
                 peopleInStomachList,
                 currentUser.AmountOfPeopleInStomach + 1,
-                // DateTime.Now
+                DateTime.Now
             };
 
             var targetUserValues = new List<object>()
@@ -105,12 +167,43 @@ namespace EconoFeast.Commands
                 random.NextSingle(),
             };
 
+            // Calculate success based on how many people are in the user.
+            // If targetUser.AmountOfPeopleInStomach is 0, automatic success.
+            bool success = true;
+            var amountOfPeopleInTargetUser = targetUser.AmountOfPeopleInStomach;
+
+            const double BASE_CALCULATION_NUMBER = 0.5;
+            const double CALCULATION_INCREMENT = 0.05;
+            const double MAX_CALCULATION_NUMBER = 0.75;
+
+            if (amountOfPeopleInTargetUser > 0)
+            {
+                if (amountOfPeopleInTargetUser >= 5) success = random.NextDouble() > MAX_CALCULATION_NUMBER;
+                else
+                {
+                    var max = BASE_CALCULATION_NUMBER;
+                    while (amountOfPeopleInTargetUser > 0)
+                    {
+                        max += CALCULATION_INCREMENT;
+                        amountOfPeopleInTargetUser -= 1;
+                    }
+                    success = random.NextDouble() > max;
+                }
+            }
+
+            if (!success)
+            {
+                var errorEmbed = Utils.MakeEmbed(DiscordColor.Red, "Failed", $"You have failed to swallow {userToEat.Username}, maybe next time.");
+                await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(errorEmbed));
+                return;
+            }
+
             // Update users
             await Utils.UpdateUserAsync(ctx.User, new List<Expression<Func<User, object>>>()
             {
                 x => x.PeopleInStomach,
                 x => x.AmountOfPeopleInStomach,
-                // x => x.LastMealTime
+                x => x.LastMealTime
             }, currentUserValues);
 
             await Utils.UpdateUserAsync(userToEat, new List<Expression<Func<User, object>>>()
@@ -120,7 +213,7 @@ namespace EconoFeast.Commands
             }, targetUserValues);
 
             var embed = Utils.MakeEmbed(DiscordColor.Green, description: $"You have successfully swallowed <@{userToEat.Id}>, let's hope they get comfy inside of you!");
-            var eatenEmbed = Utils.MakeEmbed(DiscordColor.Yellow, description: $"You were swallowed by **{Utils.MakeFirstCharacterUppercase(userToEat.Username)}**! Let's hope they're nice to you...");
+            var eatenEmbed = Utils.MakeEmbed(DiscordColor.Yellow, description: $"You were swallowed by **{Utils.MakeFirstCharacterUppercase(ctx.User.Username)}**! Let's hope they're nice to you...");
             var member = await ctx.Guild.GetMemberAsync(userToEat.Id);
 
             if (member is not null && targetUser.CanBeDmed)
@@ -324,7 +417,7 @@ namespace EconoFeast.Commands
                 {
                     var itemFields = new List<FieldData>()
                     {
-                        new FieldData("Price", $"{item.Price} bones", true),
+                        new FieldData("Price", $"{Utils.ToLocaleString(item.Price)} bones", true),
                         new FieldData("Purchase Command", $"`/buy {item.Id}`", true)
                     };
                     var itemEmbed = Utils.MakeEmbed(DiscordColor.Cyan, item.Name, item.Description, fields: itemFields);
@@ -359,6 +452,7 @@ namespace EconoFeast.Commands
                     new List<ShopItem>()
                     {
                         shopItems[5].Value,
+                        shopItems[6].Value,
                     }
                 }
             };
@@ -377,8 +471,8 @@ namespace EconoFeast.Commands
             const string title = "Shop";
             const string description = "Welcome to the shop, get some stuff to make you better than your competition!";
 
-            const string PREVIOUS_BUTTON_ID = "previous-page-shop";
-            const string NEXT_BUTTON_ID = "next-page-shop";
+            string PREVIOUS_BUTTON_ID = $"previous-page-shop-{ctx.User.Id}";
+            string NEXT_BUTTON_ID = $"next-page-shop-{ctx.User.Id}";
 
             const string PREVIOUS_BUTTON_LABEL = "Previous";
             const string NEXT_BUTTON_LABEL = "Next";
@@ -468,7 +562,7 @@ namespace EconoFeast.Commands
         [SlashCommand("buy", "Buy an item from the shop")]
         public async Task BuyItemCommand(InteractionContext ctx, [Option("id", "The item ID to buy")] string id, [Option("quantity", "How many of this item to buy, defaults to 1")] long quantity = 1)
         {
-            await ctx.DeferAsync();
+            await ctx.DeferAsync(true);
 
             if (!Globals.Items.ContainsKey(id))
             {
@@ -477,31 +571,31 @@ namespace EconoFeast.Commands
                 return;
             }
 
-            if (quantity > 1 && id == "competition")
+            var user = await Utils.GetUserAsync(ctx.User);
+            var item = Globals.Items[id];
+
+            if (quantity > 1 && item.IsSinglePurchaseOnly)
             {
                 var badQuantityEmbed = Utils.MakeErrorEmbed("You're buying an item that is limited to 1 purchase, but you provided a quantitiy greater than 1!");
                 await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(badQuantityEmbed));
                 return;
             }
 
-            var user = await Utils.GetUserAsync(ctx.User);
-            var item = Globals.Items[id];
-
             var result = await item.BuyAsync(user, Convert.ToInt32(quantity));
             ulong? price = quantity > 0 ? item.Price * Convert.ToUInt64(quantity) : null;
 
             if (!result.IsSuccess)
             {
-                var description = $"Couldn't purchase **{quantity}** of **{item.Name}**!";
-                
-                
+                var description = $"Couldn't purchase **{Utils.ToLocaleString(quantity)}** of **{item.Name}**!";
+
+
                 switch (result.FailureReason)
                 {
                     case ItemPurchaseFailureReason.BadRequest:
                         description += " You have provided a quantity less than 1, this is not allowed.";
                         break;
                     case ItemPurchaseFailureReason.InsuffientFunds:
-                        description += $" You don't have enough bones to purchase {quantity} of this item.\n\n**Item requires:** `{price}` bones (with the quantity included)\n**You have:** `{user.AmountOfBonesCollected}` bones\n**You need:** `{price - user.AmountOfBonesCollected}` more bones.\n\n**Please try again once you get enough to purchase this item.**";
+                        description += $" You don't have enough bones to purchase {Utils.ToLocaleString(quantity)} of this item.\n\n**Item requires:** `{Utils.ToLocaleString(Convert.ToUInt64(price))}` bones (with the quantity included)\n**You have:** `{Utils.ToLocaleString(user.AmountOfBonesCollected)}` bones\n**You need:** `{Utils.ToLocaleString(Convert.ToUInt64(price - user.AmountOfBonesCollected))}` more bones.\n\n**Please try again once you get enough to purchase this item.**";
                         break;
                 }
 
@@ -510,7 +604,7 @@ namespace EconoFeast.Commands
                 return;
             }
 
-            var successEmbed = Utils.MakeEmbed(DiscordColor.Green, description: $"You have successfully purchased **{quantity}** of **{item.Name}**, if this item is not an auto-redeem item, it has been added to your inventory.\n\n**You now have `{user.AmountOfBonesCollected - price}` bones left.**");
+            var successEmbed = Utils.MakeEmbed(DiscordColor.Green, description: $"You have successfully purchased **{Utils.ToLocaleString(quantity)}** of **{item.Name}**, if this item is not an auto-redeem item, it has been added to your inventory.\n\n**You now have `{Utils.ToLocaleString(Convert.ToUInt64(user.AmountOfBonesCollected - price))}` bones left.**");
             await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(successEmbed));
         }
 
@@ -535,6 +629,7 @@ namespace EconoFeast.Commands
                     Lube = currentUser.Items.Lube,
                     RatPoison = currentUser.Items.RatPoison,
                     SecretRevealer = currentUser.Items.SecretRevealer - 1,
+                    SuperCrystal = currentUser.Items.SuperCrystal
                 });
             }
 
@@ -543,10 +638,10 @@ namespace EconoFeast.Commands
             string BASE_TITLE = $"Info of {Utils.MakeFirstCharacterUppercase(user.Username)} ({user.Username})";
             const string SECRET_TEXT = "[SECRET]";
 
-            const string PREVIOUS_BUTTON_ID = "previous-page-userinfo";
+            string PREVIOUS_BUTTON_ID = $"previous-page-userinfo-{ctx.User.Id}-{user.Id}-{new Random().Next()}";
             const string PREVIOUS_BUTTON_LABEL = "Previous";
 
-            const string NEXT_BUTTON_ID = "next-page-userinfo";
+            string NEXT_BUTTON_ID = $"next-page-userinfo-{ctx.User.Id}-{user.Id}-{new Random().Next()}";
             const string NEXT_BUTTON_LABEL = "Next";
 
             #endregion
@@ -555,24 +650,28 @@ namespace EconoFeast.Commands
 
             var page1Fields = new List<FieldData>()
             {
-                new FieldData("Bones In Stomach", Utils.EvaluateBool(canSeeSecretFields, document.AmountOfBonesInStomach.ToString(), SECRET_TEXT), true),
-                new FieldData("Bones Collected", document.AmountOfBonesCollected.ToString(), true)
+                new FieldData("Bones In Stomach", Utils.EvaluateBool(canSeeSecretFields, Utils.ToLocaleString(document.AmountOfBonesInStomach), SECRET_TEXT), true),
+                new FieldData("Bones Collected", Utils.ToLocaleString(document.AmountOfBonesCollected), true)
             };
 
             // This will be updated every time a new item is added, until I find a way to automate it.
             var page2Fields = new List<FieldData>()
             {
-                new FieldData("Acid Spit", document.Items.AcidSpit.ToString(), true),
-                new FieldData("Digestion Medicine", document.Items.DigestionMedicine.ToString(), true),
-                new FieldData("Lube", document.Items.Lube.ToString(), true),
-                new FieldData("Rat Poison", Utils.EvaluateBool(canSeeSecretFields, document.Items.RatPoison.ToString(), SECRET_TEXT), true),
-                new FieldData("Secret Revealer", Utils.EvaluateBool(canSeeSecretFields, document.Items.SecretRevealer.ToString(), SECRET_TEXT), true),
+                new FieldData("Acid Spit", Utils.ToLocaleString(document.Items.AcidSpit), true),
+                new FieldData("Digestion Medicine", Utils.ToLocaleString(document.Items.DigestionMedicine), true),
+                new FieldData("Lube", Utils.EvaluateBool(canSeeSecretFields, Utils.ToLocaleString(document.Items.Lube), SECRET_TEXT), true),
+                new FieldData("Rat Poison", Utils.EvaluateBool(canSeeSecretFields, Utils.ToLocaleString(document.Items.RatPoison), SECRET_TEXT), true),
+                new FieldData("Secret Revealer", Utils.EvaluateBool(canSeeSecretFields, Utils.ToLocaleString(document.Items.SecretRevealer), SECRET_TEXT), true),
+                new FieldData("Super Crystal", Utils.EvaluateBool(canSeeSecretFields, Utils.ToLocaleString(document.Items.SuperCrystal), SECRET_TEXT), true)
             };
 
             var page3Fields = new List<FieldData>()
             {
-                new FieldData("Amount Of People Inside", document.AmountOfPeopleInStomach.ToString(), true),
-                new FieldData("Capacity", document.StomachCapacity.ToString(), true),
+                new FieldData("Amount Of People Inside", Utils.ToLocaleString(document.AmountOfPeopleInStomach), true),
+                new FieldData("Capacity", Utils.ToLocaleString(document.StomachCapacity), true),
+                new FieldData("Skin Color", document.SkinColor, true),
+                new FieldData("Stomach Color", document.StomachColor, true),
+                new FieldData("Acid Color", document.AcidColor, true)
             };
 
             #endregion
@@ -623,7 +722,7 @@ namespace EconoFeast.Commands
 
                     await e.Interaction.CreateResponseAsync(InteractionResponseType.UpdateMessage, new DiscordInteractionResponseBuilder().AddComponents(buttons).AddEmbed(embed));
                 }
-                else if (e.Id == "previous-page-userinfo")
+                else if (e.Id == PREVIOUS_BUTTON_ID)
                 {
                     pageNumber -= 1;
                     embed = Utils.LoadPage(embeds, pageNumber - 1);
@@ -658,6 +757,98 @@ namespace EconoFeast.Commands
             ctx.Client.ComponentInteractionCreated -= interactionCollector;
 
             await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddComponents(buttons).AddEmbed(embed));
+        }
+
+        [SlashCommand("escape", "Attempt to escape from your captor.")]
+        public async Task EscapeCommand(InteractionContext ctx)
+        {
+            await ctx.DeferAsync(true);
+
+            var user = await Utils.GetUserAsync(ctx.User);
+
+            if (!user.IsInStomach)
+            {
+                var word1 = Utils.LanguageFilter(ctx.Guild, "flip", "fuck");
+                var word2 = Utils.LanguageFilter(ctx.Guild, "flipping", "fucking");
+                var embed = Utils.MakeErrorEmbed($"Okay, for {word2} real, what the {word1} are you trying to escape from? {Utils.MakeFirstCharacterUppercase(word2)} reality?!");
+
+                await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(embed));
+                return;
+            }
+
+            User captor = (await Utils.GetCaptorAsync(user))!;
+            DiscordMember captorDiscord = await ctx.Guild.GetMemberAsync(Convert.ToUInt64(captor.Id));
+
+            var random = new Random();
+            double randomDouble = random.NextDouble();
+
+            bool hasLube = user.Items.Lube > 0;
+            bool success = Utils.EvaluateBool(hasLube, randomDouble > 0.55, randomDouble > 0.75);
+
+            if (hasLube)
+            {
+                ItemAmounts itemAmounts = new()
+                {
+                    AcidSpit = user.Items.AcidSpit,
+                    DigestionMedicine = user.Items.DigestionMedicine,
+                    Lube = user.Items.Lube - 1,
+                    RatPoison = user.Items.RatPoison,
+                    SecretRevealer = user.Items.SecretRevealer
+                };
+                await Utils.UpdateUserAsync(ctx.User, x => x.Items, itemAmounts);
+            }
+
+            if (success)
+            {
+                var successEmbed = Utils.MakeEmbed(DiscordColor.Green, "Success", $"You successfully escaped from {captorDiscord.Mention}'s stomach!");
+
+                var peopleInCaptor = captor.PeopleInStomach;
+                peopleInCaptor.Remove(user.Id);
+
+                IEnumerable<object> currentUserValues = new object[] { false, 0f };
+                IEnumerable<object> captorUserValues = new object[] { peopleInCaptor, Convert.ToUInt32(peopleInCaptor.Count) };
+
+                await Utils.UpdateUserAsync(ctx.User, new List<Expression<Func<User, object>>>()
+                {
+                    x => x.IsInStomach,
+                    x => x.Softness
+                }, currentUserValues);
+                await Utils.UpdateUserAsync(captorDiscord, new List<Expression<Func<User, object>>>()
+                {
+                    x => x.PeopleInStomach,
+                    x => x.AmountOfPeopleInStomach
+                }, captorUserValues);
+
+                await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(successEmbed));
+            }
+            else
+            {
+                var failureEmbed = Utils.MakeEmbed(DiscordColor.Red, "Failure", $"You failed to escape from {captorDiscord.Mention}'s stomach{Utils.EvaluateBool(user.CanBeDmed, ", and now they know you tried to escape!", "however, they're oblivious!")}");
+                var captorEmbed = Utils.MakeEmbed(DiscordColor.Yellow, "Attempted Escape", $"{ctx.User.Mention} tried to escape from your stomach, so... you gonna punish them or something...?");
+
+                await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(failureEmbed));
+
+                if (captor.CanBeDmed)
+                {
+                    await captorDiscord.SendMessageAsync(new DiscordMessageBuilder().AddEmbed(captorEmbed));
+                }
+            }
+        }
+
+        [SlashCommand("daily", "Claim your daily reward!")]
+        [SlashCooldown(1, 86400.0, SlashCooldownBucketType.User)]
+        public async Task DailyCommand(InteractionContext ctx)
+        {
+            await ctx.DeferAsync();
+
+            var user = await Utils.GetUserAsync(ctx.User);
+            var amount = user.AmountOfBonesCollected + Globals.DailyAmount;
+
+            await Utils.UpdateUserAsync(ctx.User, x => x.AmountOfBonesCollected, amount);
+            var desc = $"You claimed your daily reward of **{Utils.ToLocaleString(Globals.DailyAmount)}** bones! You now have **{Utils.ToLocaleString(amount)}** bones.";
+
+            var successEmbed = Utils.MakeEmbed(DiscordColor.Green, "Daily claimed!", desc);
+            await ctx.EditResponseAsync(new DiscordWebhookBuilder().AddEmbed(successEmbed));
         }
     }
 }
