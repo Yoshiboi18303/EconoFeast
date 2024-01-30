@@ -1,4 +1,8 @@
-﻿# EconoFeast
+# Deprecated and shut down...
+
+This bot has been shut down and is being rewritten, please stay tuned!
+ 
+ # EconoFeast
 
 EconoCord reborn with a cannibalistic vengeance.
 
